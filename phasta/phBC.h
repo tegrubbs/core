@@ -6,6 +6,7 @@
 #include <string>
 #include <apfVector.h>
 #include <gmi.h>
+#include "phExpr.h"
 #include "phInput.h"
 
 /* full names and abbreviations for boundary conditions:
@@ -106,6 +107,18 @@ struct ConstantBC : public BC
   ~ConstantBC();
   virtual double* eval(apf::Vector3 const& x);
   double* value;
+};
+
+/** \brief BC whose single value is computed from a coordinate expression.
+    \details The expression is compiled once at parse time. Supports
+             variables x, y, z and functions sqrt, abs, min, max. */
+struct ExprBC : public BC
+{
+  ExprBC(const std::string& expr);
+  virtual double* eval(apf::Vector3 const& x);
+private:
+  LevelSetFn fn;
+  double result;  // scratch space for eval return value
 };
 
 struct BCPointerLess

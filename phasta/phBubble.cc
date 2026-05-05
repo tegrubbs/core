@@ -27,7 +27,7 @@ void readBubbles(Bubbles& bubbles, std::string bubbleFileName, pcu::PCU *PCUObj)
     lion_oprint(1,"reading bubbles info from %s\n",bubblefname);
 
   filebubble = fopen(bubblefname, "r");
-  PCU_ALWAYS_ASSERT(filebubble != NULL); 
+  PCU_ALWAYS_ASSERT(filebubble != NULL);
   // File format (each line represents a bubble):
   // bubble_id x_center y_center z_center radius (5 columns in total)
   // Set bubble_id = 0 in bubble.inp for bubbles located outside the CAD (periodic channel for instance)
@@ -59,9 +59,9 @@ void setBubbleScalars(apf::Mesh* m, apf::MeshEntity* v,
   double tmpdist;
   double distance = 1e99; // Initialization critical here
 
-  /* search through bubbles, 
+  /* search through bubbles,
      find the distance to the nearet bubble membrane (sphere) */
-  for(unsigned long i=0; i<bubbles.size(); i++) 
+  for(unsigned long i=0; i<bubbles.size(); i++)
   {
     distx = (v_center[0]-bubbles[i].center[0]);
     disty = (v_center[1]-bubbles[i].center[1]);
@@ -71,7 +71,7 @@ void setBubbleScalars(apf::Mesh* m, apf::MeshEntity* v,
     if(tmpdist < distance)
     {
       distance = tmpdist;
-      if (distance < 0) 
+      if (distance < 0)
       {
         bubbleid = bubbles[i].id;
         break;
@@ -104,4 +104,3 @@ void initBubbles(apf::Mesh* m, Input& in)
 }
 
 }
-

@@ -9,6 +9,7 @@
 #include <apfMesh.h>
 #include <fstream>
 #include <sstream>
+#include <cstdlib>
 #include <cstring>
 #include <gmi.h>
 #include <pcu_util.h>
@@ -36,6 +37,17 @@ double* ConstantBC::eval(apf::Vector3 const& x)
 {
   (void)x;
   return value;
+}
+
+ExprBC::ExprBC(const std::string& expr)
+  : fn(compileLevelSetExpr(expr)), result(0.0)
+{
+}
+
+double* ExprBC::eval(apf::Vector3 const& x)
+{
+  result = fn(x[0], x[1], x[2]);
+  return &result;
 }
 
 FieldBCs::~FieldBCs()
@@ -90,9 +102,37 @@ static void readBC(std::string const& line, BCs& bcs)
   int dim, tag;
   ss >> tag >> dim;
   int nvals = getSize(name);
-  ConstantBC* bc = makeConstantBC(bcs, name, dim, tag, nvals);
-  for (int i = 0; i < nvals; ++i)
-    ss >> bc->value[i];
+
+  if (nvals == 1) {
+    /* For single-value BCs, the value may be a coordinate expression
+       (e.g. sqrt(x*x+y*y+z*z)-0.5) instead of a plain number.
+       Detect by attempting strtod; if it does not consume the whole token
+       the value is treated as an expression. */
+    std::string token;
+    ss >> token;
+    char* end;
+    double numVal = strtod(token.c_str(), &end);
+    if (end == token.c_str() + token.size()) {
+      // plain numeric constant
+      ConstantBC* bc = makeConstantBC(bcs, name, dim, tag, 1);
+      bc->value[0] = numVal;
+    } else {
+      // coordinate expression — compile it now, evaluate per vertex later
+      if (!bcs.fields.count(name)) {
+        FieldBCs fbcs;
+        bcs.fields[name] = fbcs;
+      }
+      ExprBC* bc = new ExprBC(token);
+      bc->dim = dim;
+      bc->tag = tag;
+      bcs.fields[name].bcs.insert(bc);
+    }
+  } else {
+    // multi-value BCs (comp1, comp3, initial velocity, …) must be constants
+    ConstantBC* bc = makeConstantBC(bcs, name, dim, tag, nvals);
+    for (int i = 0; i < nvals; ++i)
+      ss >> bc->value[i];
+  }
 }
 
 static void readBCsFromSPJ(const char* filename, BCs& bcs)

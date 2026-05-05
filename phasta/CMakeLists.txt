@@ -14,6 +14,7 @@ set(SOURCES
   phIO.c
   phBC.cc
   phBubble.cc
+  phExpr.cc
   phConstraint.cc
   phModelGeometry.cc
   phFilterMatching.cc
