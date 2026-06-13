@@ -50,6 +50,38 @@ double* ExprBC::eval(apf::Vector3 const& x)
   return &result;
 }
 
+ExprVelBC::ExprVelBC(const std::string& expr, double n0, double n1, double n2)
+  : fn(compileLevelSetExpr(expr))
+{
+  value[1] = n0;
+  value[2] = n1;
+  value[3] = n2;
+}
+
+double* ExprVelBC::eval(apf::Vector3 const& x)
+{
+  value[0] = fn(x[0], x[1], x[2]);
+  return value;
+}
+
+ExprInitVelBC::ExprInitVelBC(std::string const tokens[3], bool const isExpr[3], double const consts[3])
+{
+  for (int i = 0; i < 3; ++i) {
+    isExpr_[i] = isExpr[i];
+    if (isExpr[i])
+      fn_[i] = compileLevelSetExpr(tokens[i]);
+    else
+      constVal_[i] = consts[i];
+  }
+}
+
+double* ExprInitVelBC::eval(apf::Vector3 const& x)
+{
+  for (int i = 0; i < 3; ++i)
+    result_[i] = isExpr_[i] ? fn_[i](x[0], x[1], x[2]) : constVal_[i];
+  return result_;
+}
+
 FieldBCs::~FieldBCs()
 {
   while (!bcs.empty()) {
@@ -127,11 +159,59 @@ static void readBC(std::string const& line, BCs& bcs)
       bc->tag = tag;
       bcs.fields[name].bcs.insert(bc);
     }
+  } else if (name == "initial velocity") {
+    // Each component may independently be a coordinate expression or a constant.
+    std::string tokens[3];
+    double vals[3];
+    bool isExpr[3];
+    bool anyExpr = false;
+    for (int i = 0; i < 3; ++i) {
+      ss >> tokens[i];
+      char* end;
+      vals[i] = strtod(tokens[i].c_str(), &end);
+      isExpr[i] = (end != tokens[i].c_str() + tokens[i].size());
+      if (isExpr[i]) anyExpr = true;
+    }
+    if (anyExpr) {
+      if (!bcs.fields.count(name)) {
+        FieldBCs fbcs;
+        bcs.fields[name] = fbcs;
+      }
+      ExprInitVelBC* bc = new ExprInitVelBC(tokens, isExpr, vals);
+      bc->dim = dim;
+      bc->tag = tag;
+      bcs.fields[name].bcs.insert(bc);
+    } else {
+      ConstantBC* bc = makeConstantBC(bcs, name, dim, tag, 3);
+      for (int i = 0; i < 3; ++i)
+        bc->value[i] = vals[i];
+    }
   } else {
-    // multi-value BCs (comp1, comp3, initial velocity, …) must be constants
-    ConstantBC* bc = makeConstantBC(bcs, name, dim, tag, nvals);
-    for (int i = 0; i < nvals; ++i)
-      ss >> bc->value[i];
+    // multi-value BCs: read the first token to check whether magnitude is an expression
+    std::string firstToken;
+    ss >> firstToken;
+    char* end;
+    double firstNum = strtod(firstToken.c_str(), &end);
+    bool firstIsNumeric = (end == firstToken.c_str() + firstToken.size());
+    if (!firstIsNumeric) {
+      // only comp1/comp3/comp1_elas/comp3_elas (nvals==4) support an expression magnitude
+      PCU_ALWAYS_ASSERT(nvals == 4);
+      double n0, n1, n2;
+      ss >> n0 >> n1 >> n2;
+      if (!bcs.fields.count(name)) {
+        FieldBCs fbcs;
+        bcs.fields[name] = fbcs;
+      }
+      ExprVelBC* bc = new ExprVelBC(firstToken, n0, n1, n2);
+      bc->dim = dim;
+      bc->tag = tag;
+      bcs.fields[name].bcs.insert(bc);
+    } else {
+      ConstantBC* bc = makeConstantBC(bcs, name, dim, tag, nvals);
+      bc->value[0] = firstNum;
+      for (int i = 1; i < nvals; ++i)
+        ss >> bc->value[i];
+    }
   }
 }
 

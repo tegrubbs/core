@@ -121,6 +121,32 @@ private:
   double result;  // scratch space for eval return value
 };
 
+/** \brief 4-value BC (comp1/comp3/comp1_elas/comp3_elas) where the magnitude
+    is a coordinate expression and the direction components are constants.
+    Format: m(x,y,z)  nx  ny  nz */
+struct ExprVelBC : public BC
+{
+  ExprVelBC(const std::string& expr, double n0, double n1, double n2);
+  virtual double* eval(apf::Vector3 const& x);
+private:
+  LevelSetFn fn;
+  double value[4];  // [magnitude(x,y,z), nx, ny, nz]
+};
+
+/** \brief Initial velocity BC where each of the 3 components may independently
+    be a coordinate expression or a plain constant.
+    Format: vx vy vz  (each may be a number or an expression like sqrt(x*x+y*y)) */
+struct ExprInitVelBC : public BC
+{
+  ExprInitVelBC(std::string const tokens[3], bool const isExpr[3], double const consts[3]);
+  virtual double* eval(apf::Vector3 const& x);
+private:
+  bool isExpr_[3];
+  double constVal_[3];
+  LevelSetFn fn_[3];
+  double result_[3];
+};
+
 struct BCPointerLess
 {
   bool operator()(BC const* a, BC const* b) const { return *a < *b; };
