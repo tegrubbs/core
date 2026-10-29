@@ -9,6 +9,9 @@
 #include <cstring>
 #include <pcu_util.h>
 #include <cstdlib>
+#include <map>
+#include <set>
+#include <vector>
 
 namespace {
 
@@ -342,6 +345,130 @@ void readElementsV4(Reader* r)
   checkMarker(r, "$EndElements");
 }
 
+/* like seekMarker, but returns false instead of failing at end of file */
+bool trySeekMarker(Reader* r, char const* marker)
+{
+  while (!startsWith(marker, r->line)) {
+    if (gmi_getline(&r->line, &r->linecap, r->file) == -1)
+      return false;
+    r->word = r->line;
+  }
+  getLine(r);
+  return true;
+}
+
+typedef std::map<apf::MeshEntity*, apf::MeshEntity*> EntityParent;
+
+apf::MeshEntity* findRoot(EntityParent& parent, apf::MeshEntity* e)
+{
+  while (parent.count(e) && parent[e] != e)
+    e = parent[e];
+  return e;
+}
+
+void unite(EntityParent& parent, apf::MeshEntity* a, apf::MeshEntity* b)
+{
+  if (!parent.count(a)) parent[a] = a;
+  if (!parent.count(b)) parent[b] = b;
+  apf::MeshEntity* ra = findRoot(parent, a);
+  apf::MeshEntity* rb = findRoot(parent, b);
+  if (ra != rb)
+    parent[ra] = rb;
+}
+
+/* every entity in a periodic group is matched to every other one */
+void addGroupMatches(apf::Mesh2* m, EntityParent& parent)
+{
+  std::map<apf::MeshEntity*, std::vector<apf::MeshEntity*> > groups;
+  for (EntityParent::iterator it = parent.begin(); it != parent.end(); ++it)
+    groups[findRoot(parent, it->first)].push_back(it->first);
+  int self = m->getPCU()->Self();
+  for (std::map<apf::MeshEntity*, std::vector<apf::MeshEntity*> >::iterator
+       git = groups.begin(); git != groups.end(); ++git) {
+    std::vector<apf::MeshEntity*>& g = git->second;
+    for (size_t i = 0; i < g.size(); ++i)
+      for (size_t j = 0; j < g.size(); ++j)
+        if (i != j)
+          m->addMatch(g[i], self, g[j]);
+  }
+}
+
+/* reads the optional $Periodic section (MSH 4.1) and stores the node
+   correspondences as apf matches on vertices, edges and faces */
+void readPeriodicV4(Reader* r)
+{
+  PCU_ALWAYS_ASSERT(r->major_version == 4);
+  if (!trySeekMarker(r, "$Periodic"))
+    return;
+  apf::Mesh2* m = r->mesh;
+  long nlinks = getLong(r);
+  getLine(r);
+  std::set<std::pair<int, int> > slaveEnts; // (dim, tag) of slave model entities
+  std::map<apf::MeshEntity*, apf::MeshEntity*> slaveToMaster;
+  EntityParent vertParent;
+  for (long i = 0; i < nlinks; ++i) {
+    long dim = getLong(r);
+    long tag = getLong(r);
+    getLong(r); /* master tag; the node pairs carry all we need */
+    slaveEnts.insert(std::make_pair(int(dim), int(tag)));
+    getLine(r);
+    long naffine = getLong(r);
+    for (long j = 0; j < naffine; ++j)
+      getDouble(r); /* discard affine transform */
+    getLine(r);
+    long nnodes = getLong(r);
+    getLine(r);
+    for (long j = 0; j < nnodes; ++j) {
+      long sid = getLong(r);
+      long mid = getLong(r);
+      PCU_ALWAYS_ASSERT(r->nodeMap.count(sid) && r->nodeMap.count(mid));
+      apf::MeshEntity* s = r->nodeMap[sid].entity;
+      apf::MeshEntity* ms = r->nodeMap[mid].entity;
+      PCU_ALWAYS_ASSERT(s && ms);
+      slaveToMaster[s] = ms;
+      unite(vertParent, s, ms);
+      getLine(r);
+    }
+  }
+  checkMarker(r, "$EndPeriodic");
+  if (slaveToMaster.empty())
+    return;
+  apf::setMdsMatching(m, true);
+  addGroupMatches(m, vertParent);
+  /* edges and faces on a slave model entity are matched to the master entity
+     with the corresponding vertices */
+  for (int d = 1; d < m->getDimension(); ++d) {
+    EntityParent parent;
+    apf::MeshIterator* it = m->begin(d);
+    apf::MeshEntity* e;
+    while ((e = m->iterate(it))) {
+      apf::ModelEntity* g = m->toModel(e);
+      std::pair<int, int> gkey(m->getModelType(g), m->getModelTag(g));
+      if (!slaveEnts.count(gkey))
+        continue;
+      apf::Downward verts;
+      int nv = m->getDownward(e, 0, verts);
+      bool allMatched = true;
+      for (int i = 0; i < nv; ++i) {
+        if (!slaveToMaster.count(verts[i])) {
+          allMatched = false;
+          break;
+        }
+        verts[i] = slaveToMaster[verts[i]];
+      }
+      if (!allMatched)
+        continue;
+      apf::MeshEntity* me = apf::findElement(m, m->getType(e), verts);
+      PCU_ALWAYS_ASSERT_VERBOSE(me, "periodic master entity not found");
+      unite(parent, e, me);
+    }
+    m->end(it);
+    addGroupMatches(m, parent);
+  }
+  lion_oprint(1, "read %ld periodic links, %lu matched vertices\n",
+      nlinks, (unsigned long)vertParent.size());
+}
+
 void setElmPhysicalType(Reader* r, apf::Mesh2* m) {
   apf::MeshEntity* e;
   apf::MeshTag* tag = m->createIntTag("gmsh_physical_entity", 1);
@@ -424,6 +551,7 @@ void readGmsh(apf::Mesh2* m, const char* filename)
     readNodesV4(&r);
     readElementsV4(&r);
     m->acceptChanges();
+    readPeriodicV4(&r);
   } else if(r.major_version == 2) {
     readNodesV2(&r);
     readElementsV2(&r);
