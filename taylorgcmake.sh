@@ -7,6 +7,8 @@ cmake .. \
   -DCMAKE_CXX_FLAGS=" -g -O0 -DDEBUG -Wall -Wextra -Werror" \
   -DENABLE_ZOLTAN=ON \
   -DZOLTAN_INCLUDE_DIR="$ZOLTAN_INSTALL_DIR/include" \
+  -DPUMI_FORTRAN_INTERFACE=ON \
+  -DCMAKE_INSTALL_PREFIX=/home/tegrubbs/gmsh-chef/core/install \
   -DZOLTAN_LIBRARY="$ZOLTAN_INSTALL_DIR/lib/libzoltan.a" \
   -DMETIS_INCLUDE_DIR="$PARMETIS_INSTALL_DIR/include" \
   -DMETIS_LIBRARY="$PARMETIS_INSTALL_DIR/lib/libmetis.a" \
